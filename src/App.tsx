@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { BookmarkList } from './components/BookmarkList';
-import { getTree } from './utils/bookmarkService';
-import { ExternalLink, Layout, Maximize2, Zap } from 'lucide-react';
+import { getTree, searchBookmarks, type BookmarkNode } from './utils/bookmarkService';
+import { ExternalLink, Layout, Maximize2, Zap, Search, X } from 'lucide-react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 
 function App() {
   const [leftFolderId, setLeftFolderId] = useState<string | null>(null);
   const [rightFolderId, setRightFolderId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<BookmarkNode[] | null>(null);
 
   useEffect(() => {
-    // Force dark mode
     document.documentElement.classList.add('dark');
     
     const initFolders = async () => {
@@ -34,6 +37,21 @@ function App() {
     initFolders();
   }, []);
 
+  const handleSearch = async (query: string) => {
+      setSearchQuery(query);
+      if (query.trim().length > 0) {
+          const results = await searchBookmarks(query);
+          setSearchResults(results);
+      } else {
+          setSearchResults(null);
+      }
+  };
+
+  const clearSearch = () => {
+      setSearchQuery('');
+      setSearchResults(null);
+  };
+
   if (!leftFolderId || !rightFolderId) {
       return (
         <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400 gap-4">
@@ -55,12 +73,36 @@ function App() {
             <div>
                 <h1 className="text-lg font-bold text-slate-100 tracking-tight leading-none">Twin Marks</h1>
                 <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-500 font-mono">v1.1.0</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium">Resizable</span>
+                    <span className="text-[10px] text-slate-500 font-mono">v1.2.0</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium">Search</span>
                 </div>
             </div>
         </div>
-        <div className="flex-1" />
+
+        {/* Search Bar */}
+        <div className="flex-1 max-w-md mx-auto">
+            <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search size={14} className="text-slate-500 group-focus-within:text-blue-500 transition-colors" />
+                </div>
+                <input 
+                    type="text" 
+                    className="block w-full pl-10 pr-10 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    placeholder="Search bookmarks..."
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                />
+                {searchQuery && (
+                    <button 
+                        onClick={clearSearch}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
+                    >
+                        <X size={14} />
+                    </button>
+                )}
+            </div>
+        </div>
+        
         <div className="hidden sm:flex items-center gap-2 text-slate-500 text-xs font-medium mr-4">
            <Zap size={14} className="text-amber-500" />
            <span>Drag & Drop Enabled</span>
@@ -77,9 +119,16 @@ function App() {
                             <BookmarkList 
                                 title="Source Panel"
                                 folderId={leftFolderId} 
-                                onNavigate={setLeftFolderId} 
+                                customBookmarks={searchResults} // Pass search results to Left Panel
+                                onNavigate={(id) => {
+                                    if (id === 'ROOT_OR_PREV') {
+                                        clearSearch(); // Exit search mode
+                                    } else {
+                                        setLeftFolderId(id);
+                                    }
+                                }}
                                 onSelectUrl={setPreviewUrl}
-                                className="h-full border-none rounded-none"
+                                className={`h-full border-none rounded-none ${searchResults ? 'ring-2 ring-blue-500/20' : ''}`}
                             />
                         </div>
                     </Panel>

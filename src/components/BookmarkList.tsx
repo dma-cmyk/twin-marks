@@ -5,6 +5,7 @@ import { Folder, FileText, ArrowLeft, CheckCircle2, XCircle, Loader2, Trash2, Ed
 
 interface BookmarkListProps {
   folderId: string;
+  customBookmarks?: BookmarkNode[] | null; // For search results
   onNavigate: (id: string) => void;
   onSelectUrl: (url: string) => void;
   className?: string;
@@ -13,7 +14,7 @@ interface BookmarkListProps {
 
 type LinkStatus = 'idle' | 'loading' | 'ok' | 'error';
 
-export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate, onSelectUrl, className, title }) => {
+export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBookmarks, onNavigate, onSelectUrl, className, title }) => {
   const [bookmarks, setBookmarks] = useState<BookmarkNode[]>([]);
   const [currentFolder, setCurrentFolder] = useState<BookmarkNode | null>(null);
   const [linkStatuses, setLinkStatuses] = useState<Record<string, LinkStatus>>({});
@@ -23,6 +24,13 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
   const [copiedLinkFeedbackId, setCopiedLinkFeedbackId] = useState<string | null>(null);
 
   useEffect(() => {
+    // If customBookmarks is provided (e.g. search results), use it and skip fetching
+    if (customBookmarks) {
+        setBookmarks(customBookmarks);
+        setCurrentFolder(null); // No specific folder context
+        return;
+    }
+
     const handleRefresh = () => loadBookmarks();
     if (typeof chrome !== 'undefined' && chrome.bookmarks) {
         chrome.bookmarks.onCreated.addListener(handleRefresh);
@@ -38,11 +46,13 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
             chrome.bookmarks.onMoved.removeListener(handleRefresh);
         }
     }
-  }, [folderId]);
+  }, [folderId, customBookmarks]); // Add customBookmarks to dep array
 
   useEffect(() => {
-    loadBookmarks();
-  }, [folderId]);
+    if (!customBookmarks) {
+        loadBookmarks();
+    }
+  }, [folderId, customBookmarks]);
 
   const loadBookmarks = async () => {
     const nodes = await getSubTree(folderId);
@@ -108,6 +118,13 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
 
   const handleDrop = async (e: React.DragEvent, targetParentId: string) => {
       e.preventDefault();
+      // If we are in search view (customBookmarks), we shouldn't allow dropping INTO the list view generically
+      // because "Search Results" isn't a folder.
+      // But we can allow dropping if we assume user wants to move item to the *current displayed list*?
+      // Wait, if it's search results, targetParentId is basically meaningless or 'SEARCH'.
+      // So we should block drop on main area if customBookmarks is set.
+      if (customBookmarks) return;
+
       const data = e.dataTransfer.getData('application/json');
       if (data) {
           const { id, parentId: sourceParentId } = JSON.parse(data);
@@ -134,7 +151,7 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
     try {
       await navigator.clipboard.writeText(url);
       setCopiedLinkFeedbackId(id);
-      setTimeout(() => setCopiedLinkFeedbackId(null), 1500); // Hide feedback after 1.5 seconds
+      setTimeout(() => setCopiedLinkFeedbackId(null), 1500); 
     } catch (err) {
       console.error('Failed to copy text: ', err);
     }
@@ -149,7 +166,7 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
       {/* List Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center gap-3 overflow-hidden">
-            {folderId !== '0' && currentFolder && currentFolder.parentId && ( 
+            {!customBookmarks && folderId !== '0' && currentFolder && currentFolder.parentId && ( 
                  <button 
                  onClick={() => onNavigate(currentFolder.parentId!)}
                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-blue-400 transition-all duration-200"
@@ -158,12 +175,25 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
                  <ArrowLeft size={18} />
                </button>
             )}
+            {customBookmarks && (
+                 <button 
+                 onClick={() => onNavigate('ROOT_OR_PREV')} // Caller should handle this to clear search
+                 className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-blue-400 transition-all duration-200"
+                 title="Back to Folders"
+               >
+                 <ArrowLeft size={18} />
+               </button>
+            )}
+
           <div className="flex flex-col min-w-0">
              <span className="font-bold text-sm truncate text-slate-200 tracking-wide">
-                {title || currentFolder?.title || 'Root'}
+                {title || currentFolder?.title || (customBookmarks ? 'Search Results' : 'Root')}
              </span>
-             {currentFolder && (
+             {currentFolder && !customBookmarks && (
                  <span className="text-[10px] text-slate-500 font-mono truncate">/{currentFolder.title}</span>
+             )}
+             {customBookmarks && (
+                 <span className="text-[10px] text-slate-500 font-mono truncate">{bookmarks.length} hits</span>
              )}
           </div>
         </div>
@@ -181,7 +211,9 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
         {bookmarks.length === 0 && (
             <div className="flex flex-col items-center justify-center h-40 text-slate-600 space-y-2">
                 <Folder size={32} className="opacity-20" />
-                <span className="text-xs font-medium">Empty Folder</span>
+                <span className="text-xs font-medium">
+                    {customBookmarks ? 'No results found' : 'Empty Folder'}
+                </span>
             </div>
         )}
         
@@ -261,7 +293,7 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
 
                 {/* Hover Actions */}
                 <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-800/80 rounded-lg p-0.5 border border-slate-700/50 backdrop-blur-sm absolute right-2 shadow-lg">
-                    {node.url && ( // Only show copy for links
+                    {node.url && (
                         <button 
                             onClick={(e) => handleCopyLink(e, node.url!, node.id)} 
                             className="relative p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-700 rounded-md transition-colors"

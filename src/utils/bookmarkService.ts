@@ -137,14 +137,8 @@ export const moveBookmark = async (id: string, destination: { parentId: string, 
 export const removeBookmark = async (id: string): Promise<void> => {
     if (typeof chrome !== 'undefined' && chrome.bookmarks) {
          return new Promise((resolve) => {
-             // We use removeTree to allow deleting folders with content, or remove for single items.
-             // But let's check if it's a folder first? API 'remove' fails for non-empty folders.
-             // 'removeTree' works for everything but is dangerous.
-             // Let's safe-guard: use removeTree but maybe warn user in UI?
-             // For now, implementing simple remove.
              chrome.bookmarks.removeTree(id, () => {
                 if(chrome.runtime.lastError) {
-                     // Try simple remove if removeTree is not supported (unlikely in manifest v3)
                      chrome.bookmarks.remove(id, () => resolve());
                 } else {
                     resolve();
@@ -160,4 +154,20 @@ export const updateBookmark = async (id: string, changes: { title?: string, url?
             chrome.bookmarks.update(id, changes, () => resolve());
         });
     }
+}
+
+export const searchBookmarks = async (query: string): Promise<BookmarkNode[]> => {
+    if (typeof chrome !== 'undefined' && chrome.bookmarks) {
+        return new Promise((resolve) => {
+            chrome.bookmarks.search(query, (results) => {
+                if (chrome.runtime.lastError) {
+                    console.error("Search error", chrome.runtime.lastError);
+                    resolve([]);
+                    return;
+                }
+                resolve(results);
+            });
+        });
+    }
+    return Promise.resolve([]);
 }
