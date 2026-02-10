@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getSubTree, checkLink, getBookmark, removeBookmark, updateBookmark, moveBookmark } from '../utils/bookmarkService';
 import type { BookmarkNode } from '../utils/bookmarkService';
-import { Folder, FileText, ArrowLeft, CheckCircle2, XCircle, Loader2, Trash2, Edit2, Copy } from 'lucide-react';
+import { Folder, FileText, ArrowLeft, CheckCircle2, XCircle, Loader2, Trash2, Edit2, Copy, CheckSquare, Square } from 'lucide-react';
 
 interface BookmarkListProps {
   folderId: string;
@@ -22,12 +22,14 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
   const [editTitle, setEditTitle] = useState('');
   const [editUrl, setEditUrl] = useState('');
   const [copiedLinkFeedbackId, setCopiedLinkFeedbackId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // If customBookmarks is provided (e.g. search results), use it and skip fetching
     if (customBookmarks) {
         setBookmarks(customBookmarks);
         setCurrentFolder(null); // No specific folder context
+        setSelectedIds(new Set()); // Reset selection on new search
         return;
     }
 
@@ -46,11 +48,12 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
             chrome.bookmarks.onMoved.removeListener(handleRefresh);
         }
     }
-  }, [folderId, customBookmarks]); // Add customBookmarks to dep array
+  }, [folderId, customBookmarks]); 
 
   useEffect(() => {
     if (!customBookmarks) {
         loadBookmarks();
+        setSelectedIds(new Set()); // Reset selection on folder change
     }
   }, [folderId, customBookmarks]);
 
@@ -68,12 +71,18 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
 
   const handleCheckLinks = async () => {
     const newStatuses = { ...linkStatuses };
-    bookmarks.forEach(b => {
+    
+    // Only check selected if any, otherwise all
+    const targets = selectedIds.size > 0 
+        ? bookmarks.filter(b => selectedIds.has(b.id)) 
+        : bookmarks;
+
+    targets.forEach(b => {
       if (b.url) newStatuses[b.id] = 'loading';
     });
     setLinkStatuses(newStatuses);
 
-    await Promise.all(bookmarks.map(async (b) => {
+    await Promise.all(targets.map(async (b) => {
       if (b.url) {
         const result = await checkLink(b.url);
         setLinkStatuses(prev => ({
@@ -89,6 +98,15 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
     if (confirm('Are you sure you want to delete this?')) {
         await removeBookmark(id);
     }
+  };
+
+  const handleBulkDelete = async () => {
+      if (selectedIds.size === 0) return;
+      if (confirm(`Are you sure you want to delete ${selectedIds.size} items?`)) {
+          // Process in sequence or parallel? Parallel is fine.
+          await Promise.all(Array.from(selectedIds).map(id => removeBookmark(id)));
+          setSelectedIds(new Set());
+      }
   };
 
   const startEdit = (e: React.MouseEvent, node: BookmarkNode) => {
@@ -107,6 +125,8 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
   };
 
   const handleDragStart = (e: React.DragEvent, node: BookmarkNode) => {
+      // If dragging a selected item, we could support multi-drag later.
+      // For now, simple single item drag.
       e.dataTransfer.setData('application/json', JSON.stringify({ id: node.id, parentId: node.parentId }));
       e.dataTransfer.effectAllowed = 'move';
   };
@@ -118,11 +138,6 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
 
   const handleDrop = async (e: React.DragEvent, targetParentId: string) => {
       e.preventDefault();
-      // If we are in search view (customBookmarks), we shouldn't allow dropping INTO the list view generically
-      // because "Search Results" isn't a folder.
-      // But we can allow dropping if we assume user wants to move item to the *current displayed list*?
-      // Wait, if it's search results, targetParentId is basically meaningless or 'SEARCH'.
-      // So we should block drop on main area if customBookmarks is set.
       if (customBookmarks) return;
 
       const data = e.dataTransfer.getData('application/json');
@@ -157,6 +172,25 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
     }
   };
 
+  const toggleSelection = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      const newSet = new Set(selectedIds);
+      if (newSet.has(id)) {
+          newSet.delete(id);
+      } else {
+          newSet.add(id);
+      }
+      setSelectedIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+      if (selectedIds.size === bookmarks.length && bookmarks.length > 0) {
+          setSelectedIds(new Set());
+      } else {
+          setSelectedIds(new Set(bookmarks.map(b => b.id)));
+      }
+  };
+
   return (
     <div 
         className={`flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl ${className}`}
@@ -166,6 +200,19 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
       {/* List Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center gap-3 overflow-hidden">
+             {/* Select All Checkbox */}
+             <button 
+                onClick={toggleSelectAll}
+                className="text-slate-500 hover:text-blue-400 transition-colors"
+                title="Select All"
+             >
+                 {bookmarks.length > 0 && selectedIds.size === bookmarks.length ? (
+                     <CheckSquare size={18} className="text-blue-500" />
+                 ) : (
+                     <Square size={18} />
+                 )}
+             </button>
+
             {!customBookmarks && folderId !== '0' && currentFolder && currentFolder.parentId && ( 
                  <button 
                  onClick={() => onNavigate(currentFolder.parentId!)}
@@ -177,7 +224,7 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
             )}
             {customBookmarks && (
                  <button 
-                 onClick={() => onNavigate('ROOT_OR_PREV')} // Caller should handle this to clear search
+                 onClick={() => onNavigate('ROOT_OR_PREV')} 
                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-blue-400 transition-all duration-200"
                  title="Back to Folders"
                >
@@ -187,23 +234,36 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
 
           <div className="flex flex-col min-w-0">
              <span className="font-bold text-sm truncate text-slate-200 tracking-wide">
-                {title || currentFolder?.title || (customBookmarks ? 'Search Results' : 'Root')}
+                {selectedIds.size > 0 ? `${selectedIds.size} Selected` : (title || currentFolder?.title || (customBookmarks ? 'Search Results' : 'Root'))}
              </span>
-             {currentFolder && !customBookmarks && (
+             {currentFolder && !customBookmarks && selectedIds.size === 0 && (
                  <span className="text-[10px] text-slate-500 font-mono truncate">/{currentFolder.title}</span>
              )}
-             {customBookmarks && (
+             {customBookmarks && selectedIds.size === 0 && (
                  <span className="text-[10px] text-slate-500 font-mono truncate">{bookmarks.length} hits</span>
              )}
           </div>
         </div>
-        <button 
-            onClick={handleCheckLinks}
-            className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 bg-slate-800 text-slate-300 rounded-full hover:bg-blue-600 hover:text-white transition-all duration-300 border border-slate-700 hover:border-blue-500 shadow-sm"
-        >
-            <CheckCircle2 size={12} />
-            <span>Scan</span>
-        </button>
+        
+        <div className="flex items-center gap-2">
+            {selectedIds.size > 0 && (
+                <button 
+                    onClick={handleBulkDelete}
+                    className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 bg-rose-500/10 text-rose-400 rounded-full hover:bg-rose-600 hover:text-white transition-all duration-300 border border-rose-500/20 hover:border-rose-500 shadow-sm"
+                >
+                    <Trash2 size={12} />
+                    <span>Delete</span>
+                </button>
+            )}
+
+            <button 
+                onClick={handleCheckLinks}
+                className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 bg-slate-800 text-slate-300 rounded-full hover:bg-blue-600 hover:text-white transition-all duration-300 border border-slate-700 hover:border-blue-500 shadow-sm"
+            >
+                <CheckCircle2 size={12} />
+                <span>Scan</span>
+            </button>
+        </div>
       </div>
 
       {/* List Content */}
@@ -220,6 +280,7 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
         {bookmarks.map((node) => (
             editingId === node.id ? (
                 <form key={node.id} onSubmit={saveEdit} className="p-3 bg-slate-800 rounded-lg border border-blue-500/50 shadow-lg animate-in fade-in zoom-in-95 duration-200">
+                   {/* Edit Form Content - same as before */}
                     <div className="space-y-2">
                         <input 
                             className="w-full p-2 text-sm bg-slate-950 text-slate-200 rounded-md border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
@@ -249,8 +310,12 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
             onDragStart={(e) => handleDragStart(e, node)}
             onDragOver={handleDragOver}
             onDrop={(e) => !node.url ? handleDropOnFolder(e, node.id) : undefined}
-            className="group relative flex items-center gap-3 p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-all duration-200 border border-transparent hover:border-slate-700"
+            className={`group relative flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all duration-200 border ${selectedIds.has(node.id) ? 'bg-blue-900/20 border-blue-500/30' : 'hover:bg-slate-800 border-transparent hover:border-slate-700'}`}
             onClick={() => {
+              // Click now toggles selection if ctrl/cmd is pressed? 
+              // Or standard behavior: Click = Navigate/Select. 
+              // User asked for "Checkboxes". So click on body can still be Navigate/SelectUrl.
+              // Click on checkbox = Toggle Selection.
               if (node.url) {
                 onSelectUrl(node.url);
               } else {
@@ -258,6 +323,14 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, customBook
               }
             }}
           >
+            {/* Checkbox - Leftmost */}
+            <div 
+                onClick={(e) => toggleSelection(e, node.id)}
+                className={`p-1 rounded hover:bg-slate-700/50 cursor-pointer ${selectedIds.has(node.id) ? 'text-blue-500' : 'text-slate-600 hover:text-slate-400'}`}
+            >
+                {selectedIds.has(node.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+            </div>
+
             {/* Icon */}
             <div className={`p-2 rounded-lg ${!node.url ? 'bg-amber-500/10 text-amber-500' : 'bg-slate-700/30 text-slate-400 group-hover:text-blue-400 group-hover:bg-blue-500/10'} transition-colors duration-300`}>
                 {!node.url ? <Folder size={18} fill="currentColor" fillOpacity={0.2} /> : <FileText size={18} />}
