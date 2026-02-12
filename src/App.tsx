@@ -81,6 +81,7 @@ function App() {
                                 onNavigate={setLeftFolderId}
                                 onSelectUrl={setPreviewUrl}
                                 className="h-full border-none rounded-none"
+                                selectedUrl={previewUrl}
                             />
                         </div>
                     </Panel>
@@ -97,6 +98,7 @@ function App() {
                                 onNavigate={setRightFolderId} 
                                 onSelectUrl={setPreviewUrl}
                                 className="h-full border-none rounded-none"
+                                selectedUrl={previewUrl}
                             />
                         </div>
                     </Panel>

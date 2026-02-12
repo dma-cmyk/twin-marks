@@ -9,12 +9,13 @@ interface BookmarkListProps {
   onSelectUrl: (url: string) => void;
   className?: string;
   title?: string;
+  selectedUrl?: string | null; // Added for highlighting selected bookmark
 }
 
 type LinkStatus = 'idle' | 'loading' | 'ok' | 'error';
 type ViewMode = 'folder' | 'search';
 
-export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate, onSelectUrl, className, title }) => {
+export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate, onSelectUrl, className, title, selectedUrl }) => {
   const [bookmarks, setBookmarks] = useState<BookmarkNode[]>([]); // Folder contents
   const [searchResults, setSearchResults] = useState<BookmarkNode[]>([]); // Search results
   const [viewMode, setViewMode] = useState<ViewMode>('folder');
@@ -403,7 +404,14 @@ export const BookmarkList: React.FC<BookmarkListProps> = ({ folderId, onNavigate
             onDragStart={(e) => handleDragStart(e, node)}
             onDragOver={handleDragOver}
             onDrop={(e) => !node.url ? handleDropOnFolder(e, node.id) : undefined}
-            className={`group relative flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all duration-200 border ${selectedIds.has(node.id) ? 'bg-blue-900/20 border-blue-500/30' : 'hover:bg-slate-800 border-transparent hover:border-slate-700'}`}
+            className={`group relative flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all duration-200 border 
+              ${selectedIds.has(node.id) 
+                  ? 'bg-blue-900/20 border-blue-500/30' 
+                  : (node.url && node.url === selectedUrl 
+                      ? 'bg-blue-700/30 border-blue-500/50' // Highlight if selected URL
+                      : 'hover:bg-slate-800 border-transparent hover:border-slate-700' // Default hover
+                  )
+              }`}
             onClick={() => {
               if (node.url) {
                 onSelectUrl(node.url);

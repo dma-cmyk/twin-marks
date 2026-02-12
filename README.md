@@ -29,7 +29,7 @@
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/your-username/twin-marks.git
+git clone https://github.com/dma-cmyk/twin-marks.git
 cd twin-marks
 
 # 依存関係のインストール
